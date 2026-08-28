@@ -1,0 +1,17 @@
+[
+  {
+    "directory": "C:/Users/Vilgot/dev/tree-cutter-simulator",
+    "file": "C:/Users/Vilgot/dev/tree-cutter-simulator/main.cpp",
+    "arguments": [
+      "clang++",
+      "-std=c++17",
+      "-g",
+      "-gcodeview",
+      "-Ithird_party/SDL3-3.4.14/include",
+      "-c",
+      "main.cpp",
+      "-o",
+      "build/main.o"
+    ]
+  }
+]

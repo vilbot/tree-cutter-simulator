@@ -11,8 +11,6 @@
 #define MAX_TREES 20
 #define HITBOX_SIZE 0.90f
 
-// TODO: The cursor should obviously be an axe 
-
 enum difficulty {
 	EASY,
 	MEDIUM,
@@ -49,21 +47,21 @@ typedef struct {
 	SDL_Surface* mouse_sprite[2];
 	SDL_Cursor* cursor[2];
 	grid grid;
+	difficulty current_difficulty;
 	bool main_menu;
 	bool difficulty_menu;
 	bool game_started;
 	bool game_paused;
-	difficulty current_difficulty;
 } game_state;
 
-bool load_texture(game_state* state, const char* texture_name)
+SDL_AppResult load_texture(game_state* state, const char* texture_name, SDL_Texture*& texture_reference)
 {
 	char* texture_png_path = NULL;
 	SDL_asprintf(&texture_png_path, "%s../assets/%s.png", SDL_GetBasePath(), texture_name);
 	SDL_Surface* surface = SDL_LoadPNG(texture_png_path);
 	if(!surface) {
 		SDL_Log("Couldn't load png: %s", SDL_GetError());
-		return false;
+		return SDL_APP_FAILURE;
 	}
 	SDL_free(texture_png_path);
 
@@ -71,12 +69,15 @@ bool load_texture(game_state* state, const char* texture_name)
 	state->textures[texture_name] = temp;
 	if(!state->textures[texture_name]) {
 		SDL_Log("Couldn't create texture from surface: %s", SDL_GetError());
-		return false;
+		return SDL_APP_FAILURE;
 	}
 
 	SDL_DestroySurface(surface);
 	SDL_SetTextureScaleMode(state->textures[texture_name], SDL_SCALEMODE_NEAREST);
-	return true;
+
+	texture_reference = state->textures[texture_name];
+
+	return SDL_APP_SUCCESS;
 }
 
 bool is_inside(float xclick, float yclick, SDL_FRect area)
@@ -93,7 +94,7 @@ bool is_inside(float xclick, float yclick, float xstart, float ystart, float xen
 	yclick >= ystart && yclick <= yend;
 }
 
-// NOTE: How to lerp?
+// TODO: Add lerping when hovering
 void resize_rect(SDL_FRect* base, SDL_FRect target)
 {
 	base->x = target.x;
@@ -119,7 +120,7 @@ void resize_rect(SDL_FRect* base, float scale)
 void set_difficulty(game_state* state, difficulty difficulty)
 {
 	state->current_difficulty = difficulty;
-	int diff_multiplier = 1; // Needs to be divisible by 720 or whatever resolution the grid has
+	int diff_multiplier = 1; // Needs to divide 720 or whatever resolution the grid has
 
 	switch(state->current_difficulty) {
 		case EASY:
@@ -158,6 +159,26 @@ void set_difficulty(game_state* state, difficulty difficulty)
 	}
 }
 
+void create_menu(std::initializer_list<grow_sprite*> argument_list) 
+{
+	float enlargement = 1.15f;
+
+	std::vector<grow_sprite*> items(argument_list);
+
+	for(int i = 0; i < items.size(); ++i) {
+		SDL_GetTextureSize(items[i]->texture, &items[i]->rect.base_size.w, &items[i]->rect.base_size.h);
+		items[i]->rect.base_size.x = 100;
+
+		if(i == 0) 
+			items[i]->rect.base_size.y = 50;
+		else 
+			items[i]->rect.base_size.y = 100 + items[i - 1]->rect.base_size.y + items[i - 1]->rect.base_size.h;
+
+		items[i]->rect.hover_size = items[i]->rect.render_size = items[i]->rect.base_size;
+		resize_rect(&items[i]->rect.hover_size, enlargement);
+	}
+}
+
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 {
 	game_state* state = new game_state;
@@ -178,58 +199,30 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 
 	SDL_SetRenderLogicalPresentation(state->renderer, WIDTH, HEIGHT, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
-	if(!load_texture(state, "continue")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "difficulty")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "easy")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "exit")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "ground")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "hard")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "medium")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "quit")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "start-game")) return SDL_APP_FAILURE;
-	if(!load_texture(state, "tree")) return SDL_APP_FAILURE;
+	if(!load_texture(state, "continue", state->menu["continue"].texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "difficulty", state->menu["difficulty"].texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "easy", state->menu["easy"].texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "exit", state->menu["exit"].texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "hard", state->menu["hard"].texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "medium", state->menu["medium"].texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "quit", state->menu["quit"].texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "start-game", state->menu["start-game"].texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "tree", state->grid.tree_texture)) return SDL_APP_FAILURE;
+	if(!load_texture(state, "ground", state->grid.ground_texture)) return SDL_APP_FAILURE;
 
-	state->grid.tree_texture = state->textures["tree"];
-	state->grid.ground_texture = state->textures["ground"];
-	state->menu["start-game"].texture = state->textures["start-game"];
-	state->menu["difficulty"].texture = state->textures["difficulty"];
-	state->menu["quit"].texture = state->textures["quit"];
-	state->menu["easy"].texture = state->textures["easy"];
-	state->menu["medium"].texture = state->textures["medium"];
-	state->menu["hard"].texture = state->textures["hard"];
-	state->menu["continue"].texture = state->textures["continue"];
-	state->menu["exit"].texture = state->textures["exit"];
+	create_menu({&state->menu["start-game"], &state->menu["difficulty"], &state->menu["exit"]});
+	create_menu({&state->menu["easy"], &state->menu["medium"], &state->menu["hard"]});
+	create_menu({&state->menu["continue"], &state->menu["quit"]});
 
+	// TODO: Animate the mouse rather than switch between two sprites
+	char* png_path = NULL;
+	SDL_asprintf(&png_path, "%s../assets/axe1.png", SDL_GetBasePath());
+	state->mouse_sprite[0] = SDL_LoadPNG(png_path);
+	SDL_free(png_path);
 
-	// TODO: Refactor this so that adding submenus becomes easier
-	float enlargement = 1.15f;
-	SDL_FRect start_game, difficulty, quit;
-	SDL_GetTextureSize(state->textures["start-game"], &start_game.w, &start_game.h);
-	SDL_GetTextureSize(state->textures["difficulty"], &difficulty.w, &difficulty.h);
-	SDL_GetTextureSize(state->textures["quit"], &quit.w, &quit.h);
-
-	start_game.x = difficulty.x = quit.x = 100;
-
-	start_game.y = 50;
-	difficulty.y = 100 + start_game.y + start_game.h;
-	quit.y = 100 + difficulty.y + difficulty.h;
-
-	state->menu["start-game"].rect.base_size = state->menu["start-game"].rect.hover_size = state->menu["start-game"].rect.render_size = start_game;
-	state->menu["difficulty"].rect.base_size = state->menu["difficulty"].rect.hover_size = state->menu["difficulty"].rect.render_size = difficulty;
-	state->menu["quit"].rect.base_size = state->menu["quit"].rect.hover_size = state->menu["quit"].rect.render_size = quit;
-
-	resize_rect(&state->menu["start-game"].rect.hover_size, enlargement);
-	resize_rect(&state->menu["difficulty"].rect.hover_size, enlargement);
-	resize_rect(&state->menu["quit"].rect.hover_size, enlargement);
-
-	char* texture_png_path = NULL;
-	SDL_asprintf(&texture_png_path, "%s../assets/axe1.png", SDL_GetBasePath());
-	state->mouse_sprite[0] = SDL_LoadPNG(texture_png_path);
-	SDL_free(texture_png_path);
-
-	SDL_asprintf(&texture_png_path, "%s../assets/axe2.png", SDL_GetBasePath());
-	state->mouse_sprite[1] = SDL_LoadPNG(texture_png_path);
-	SDL_free(texture_png_path);
+	SDL_asprintf(&png_path, "%s../assets/axe2.png", SDL_GetBasePath());
+	state->mouse_sprite[1] = SDL_LoadPNG(png_path);
+	SDL_free(png_path);
 
 	state->cursor[0] = SDL_CreateColorCursor(state->mouse_sprite[0], 0, 0);
 	state->cursor[1] = SDL_CreateColorCursor(state->mouse_sprite[1], 0, 0);
@@ -237,13 +230,13 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 	if(!state->cursor[0] || !state->cursor[1]) {
 		SDL_Log("Couldn't create cursor: %s", SDL_GetError());
 		return SDL_APP_FAILURE;
-
 	}
 
 
 	state->main_menu = true;
 	state->difficulty_menu = false;
 	state->game_started = false;
+	state->game_paused = false;
 
 	set_difficulty(state, MEDIUM);
 
@@ -266,7 +259,6 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 					SDL_SetCursor(state->cursor[0]);
 					float xlclick, ylclick;
 					SDL_GetMouseState(&xlclick, &ylclick);
-					// TODO: Add the submenu system
 					if(state->main_menu) {
 						if(is_inside(xlclick, ylclick, state->menu["start-game"].rect.render_size)) {
 							state->main_menu = false;
@@ -277,15 +269,42 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 							state->main_menu = false;
 							state->difficulty_menu = true;
 						}
-						if(is_inside(xlclick, ylclick, state->menu["quit"].rect.render_size)) {
-							return SDL_APP_FAILURE;
+						if(is_inside(xlclick, ylclick, state->menu["exit"].rect.render_size)) {
+							return SDL_APP_SUCCESS;
 						}
 					}
-					if(state->game_started) {
+					if(state->difficulty_menu) {
+						if(is_inside(xlclick, ylclick, state->menu["easy"].rect.render_size)) {
+							set_difficulty(state, EASY); 
+						}
+						if(is_inside(xlclick, ylclick, state->menu["medium"].rect.render_size)) {
+							set_difficulty(state, MEDIUM); 
+						}
+						if(is_inside(xlclick, ylclick, state->menu["hard"].rect.render_size)) {
+							set_difficulty(state, HARD); 
+						}
+					}
+					if(state->game_started && !state->game_paused) {
 						for(int y = 0; y < state->grid.rows; ++y) {
 							for(int x = 0; x < state->grid.cols; ++x) {
 								if(is_inside(xlclick, ylclick, state->grid.hitboxes[y][x])) {
 									state->grid.is_occupied[y][x] = false;
+								}
+							}
+						}
+					}
+					if(state->game_paused) {
+						if(is_inside(xlclick, ylclick, state->menu["continue"].rect.hover_size)) {
+							state->game_paused = false;
+						}
+						if(is_inside(xlclick, ylclick, state->menu["quit"].rect.hover_size)) {
+							state->game_started = false;
+							state->game_paused = false;
+							state->main_menu = true;
+							state->difficulty_menu = false;
+							for(int y = 0; y < state->grid.rows; ++y) {
+								for(int x = 0; x < state->grid.cols; ++x) {
+									state->grid.is_occupied[y][x] = true;
 								}
 							}
 						}
@@ -298,7 +317,6 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 		case SDL_EVENT_MOUSE_MOTION:
 			float xmotion, ymotion;
 			SDL_GetMouseState(&xmotion, &ymotion);
-			if(state->main_menu) {
 				for(auto &[key, menu] : state->menu) {
 					if(is_inside(xmotion, ymotion, menu.rect.render_size)) {
 						resize_rect(&menu.rect.render_size, menu.rect.hover_size);
@@ -307,16 +325,15 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 						resize_rect(&menu.rect.render_size, menu.rect.base_size);
 					}
 				}
-			}
 			break;
 		case SDL_EVENT_KEY_DOWN:
 			switch(event->key.key) {
 				case SDLK_ESCAPE:
+					if(state->game_started) {
+						state->game_paused = !state->game_paused;
+					}
 					if(state->difficulty_menu) {
 						state->difficulty_menu = false;
-						state->main_menu = true;
-					}
-					if(!state->main_menu) {
 						state->main_menu = true;
 					}
 					break;
@@ -346,10 +363,16 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 	if(state->main_menu) {
 		SDL_RenderTexture(state->renderer, state->menu["start-game"].texture, NULL, &state->menu["start-game"].rect.render_size);
 		SDL_RenderTexture(state->renderer, state->menu["difficulty"].texture, NULL, &state->menu["difficulty"].rect.render_size);
-		SDL_RenderTexture(state->renderer, state->menu["quit"].texture, NULL, &state->menu["quit"].rect.render_size);
+		SDL_RenderTexture(state->renderer, state->menu["exit"].texture, NULL, &state->menu["exit"].rect.render_size);
 	}
 	if(state->difficulty_menu) {
 		SDL_RenderTexture(state->renderer, state->menu["easy"].texture, NULL, &state->menu["easy"].rect.render_size);
+		SDL_RenderTexture(state->renderer, state->menu["medium"].texture, NULL, &state->menu["medium"].rect.render_size);
+		SDL_RenderTexture(state->renderer, state->menu["hard"].texture, NULL, &state->menu["hard"].rect.render_size);
+	}
+	if(state->game_paused) {
+		SDL_RenderTexture(state->renderer, state->menu["continue"].texture, NULL, &state->menu["continue"].rect.render_size);
+		SDL_RenderTexture(state->renderer, state->menu["quit"].texture, NULL, &state->menu["quit"].rect.render_size);
 	}
 
 	SDL_RenderPresent(state->renderer);

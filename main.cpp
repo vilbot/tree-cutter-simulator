@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <cmath>
 
 #define WIDTH 720
 #define HEIGHT 720
@@ -37,6 +38,10 @@ typedef struct {
 typedef struct {
 	SDL_Texture* texture;
 	grow_rect rect;
+	float lerp_value;
+	SDL_FRect base_size;
+	SDL_FRect hover_size;
+	SDL_FRect render_size;
 } grow_sprite;
 
 typedef struct {
@@ -52,7 +57,17 @@ typedef struct {
 	bool difficulty_menu;
 	bool game_started;
 	bool game_paused;
+	Uint64 start_time;
+	Uint64 previous_time;
 } game_state;
+
+bool operator==(const SDL_FRect &a, const SDL_FRect &b) {
+	return a.h == b.h && a.w == b.w;
+}
+
+bool operator!=(const SDL_FRect &a, const SDL_FRect &b) {
+	return a.h != b.h || a.w != b.w;
+}
 
 SDL_AppResult load_texture(game_state* state, const char* texture_name, SDL_Texture*& texture_reference)
 {
@@ -83,18 +98,17 @@ SDL_AppResult load_texture(game_state* state, const char* texture_name, SDL_Text
 bool is_inside(float xclick, float yclick, SDL_FRect area)
 {
 	return
-	xclick >= area.x && xclick <= area.x + area.w &&
-	yclick >= area.y && yclick <= area.y + area.h;
+		xclick >= area.x && xclick <= area.x + area.w &&
+		yclick >= area.y && yclick <= area.y + area.h;
 }
 
 bool is_inside(float xclick, float yclick, float xstart, float ystart, float xend, float yend)
 {
 	return
-	xclick >= xstart && xclick <= xend &&
-	yclick >= ystart && yclick <= yend;
+		xclick >= xstart && xclick <= xend &&
+		yclick >= ystart && yclick <= yend;
 }
 
-// TODO: Add lerping when hovering
 void resize_rect(SDL_FRect* base, SDL_FRect target)
 {
 	base->x = target.x;
@@ -176,6 +190,7 @@ void create_menu(std::initializer_list<grow_sprite*> argument_list)
 
 		items[i]->rect.hover_size = items[i]->rect.render_size = items[i]->rect.base_size;
 		resize_rect(&items[i]->rect.hover_size, enlargement);
+		items[i]->lerp_value = 1.0f;
 	}
 }
 
@@ -186,6 +201,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 		return SDL_APP_FAILURE;
 	}
 	*appstate = state;
+
+	state->start_time = SDL_GetTicks();
+	state->previous_time = state->start_time;
 
 	if(!SDL_Init(SDL_INIT_VIDEO)) {
 		SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
@@ -231,7 +249,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 		SDL_Log("Couldn't create cursor: %s", SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-
 
 	state->main_menu = true;
 	state->difficulty_menu = false;
@@ -317,14 +334,14 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 		case SDL_EVENT_MOUSE_MOTION:
 			float xmotion, ymotion;
 			SDL_GetMouseState(&xmotion, &ymotion);
-				for(auto &[key, menu] : state->menu) {
-					if(is_inside(xmotion, ymotion, menu.rect.render_size)) {
-						resize_rect(&menu.rect.render_size, menu.rect.hover_size);
-					}
-					else {
-						resize_rect(&menu.rect.render_size, menu.rect.base_size);
-					}
-				}
+			// for(auto &[key, menu] : state->menu) {
+			// 	if(is_inside(xmotion, ymotion, menu.rect.render_size)) {
+			// 		resize_rect(&menu.rect.render_size, menu.rect.hover_size);
+			// 	}
+			// 	else {
+			// 		resize_rect(&menu.rect.render_size, menu.rect.base_size);
+			// 	}
+			// }
 			break;
 		case SDL_EVENT_KEY_DOWN:
 			switch(event->key.key) {
@@ -350,13 +367,46 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 	SDL_SetRenderDrawColor(state->renderer, 0, 0, 0, 255);
 	SDL_RenderClear(state->renderer);
 
+	float xpos, ypos;
+	SDL_GetMouseState(&xpos, &ypos);
+	float lerp_max = 1.15, lerp_min = 1.0;
+	float lerp_value = 0.01;
+
+	for(auto &[key, item] : state->menu) {
+		if(is_inside(xpos, ypos, item.rect.base_size)) {
+			item.lerp_value= std::lerp(item.lerp_value, lerp_max, lerp_value);
+		}
+		else {
+			item.lerp_value = std::lerp(item.lerp_value, lerp_min, lerp_value);
+		}
+
+		SDL_FRect temp;
+		temp.x = item.rect.base_size.x;
+		temp.y = item.rect.base_size.y;
+		temp.w = item.rect.base_size.w;
+		temp.h = item.rect.base_size.h;
+
+		item.rect.render_size.w = temp.w * (item.lerp_value);
+		item.rect.render_size.h = temp.h * (item.lerp_value);
+		item.rect.render_size.x = temp.x - (item.rect.render_size.w - temp.w) / 2;
+		item.rect.render_size.y = temp.y - (item.rect.render_size.h - temp.h) / 2;
+
+		if(item.rect.render_size.h <= item.rect.base_size.h || item.rect.render_size.w <= item.rect.base_size.w) {
+			resize_rect(&item.rect.render_size, item.rect.base_size);
+		}
+
+		if(item.rect.render_size.h >= item.rect.hover_size.h || item.rect.render_size.w >= item.rect.hover_size.w) {
+			resize_rect(&item.rect.render_size, item.rect.hover_size);
+		}
+	}
+
 	for(int y = 0; y < state->grid.rows; ++y) {
 		for(int x = 0; x < state->grid.cols; ++x) {
 			SDL_RenderTexture(state->renderer, state->grid.ground_texture, NULL, &state->grid.location[y][x]);
 			if(state->grid.is_occupied[y][x]) {
 				SDL_RenderTexture(state->renderer, state->grid.tree_texture, NULL, &state->grid.location[y][x]);
 			}
-			// SDL_RenderRect(state->renderer, &state->trees.hitboxes[y][x]);
+			// SDL_RenderRect(state->renderer, &state->grid.hitboxes[y][x]);
 		}
 	}
 

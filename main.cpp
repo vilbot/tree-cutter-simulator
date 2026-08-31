@@ -30,18 +30,11 @@ typedef struct {
 } grid;
 
 typedef struct {
-	SDL_FRect base_size;
-	SDL_FRect hover_size;
-	SDL_FRect render_size;
-} grow_rect;
-
-typedef struct {
 	SDL_Texture* texture;
-	grow_rect rect;
-	float lerp_value;
 	SDL_FRect base_size;
 	SDL_FRect hover_size;
 	SDL_FRect render_size;
+	float lerp_value;
 } grow_sprite;
 
 typedef struct {
@@ -180,16 +173,16 @@ void create_menu(std::initializer_list<grow_sprite*> argument_list)
 	std::vector<grow_sprite*> items(argument_list);
 
 	for(int i = 0; i < items.size(); ++i) {
-		SDL_GetTextureSize(items[i]->texture, &items[i]->rect.base_size.w, &items[i]->rect.base_size.h);
-		items[i]->rect.base_size.x = 100;
+		SDL_GetTextureSize(items[i]->texture, &items[i]->base_size.w, &items[i]->base_size.h);
+		items[i]->base_size.x = 100;
 
 		if(i == 0) 
-			items[i]->rect.base_size.y = 50;
+			items[i]->base_size.y = 50;
 		else 
-			items[i]->rect.base_size.y = 100 + items[i - 1]->rect.base_size.y + items[i - 1]->rect.base_size.h;
+			items[i]->base_size.y = 100 + items[i - 1]->base_size.y + items[i - 1]->base_size.h;
 
-		items[i]->rect.hover_size = items[i]->rect.render_size = items[i]->rect.base_size;
-		resize_rect(&items[i]->rect.hover_size, enlargement);
+		items[i]->hover_size = items[i]->render_size = items[i]->base_size;
+		resize_rect(&items[i]->hover_size, enlargement);
 		items[i]->lerp_value = 1.0f;
 	}
 }
@@ -277,27 +270,27 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 					float xlclick, ylclick;
 					SDL_GetMouseState(&xlclick, &ylclick);
 					if(state->main_menu) {
-						if(is_inside(xlclick, ylclick, state->menu["start-game"].rect.render_size)) {
+						if(is_inside(xlclick, ylclick, state->menu["start-game"].render_size)) {
 							state->main_menu = false;
 							state->game_started = true;
 							break;
 						}
-						if(is_inside(xlclick, ylclick, state->menu["difficulty"].rect.render_size)) {
+						if(is_inside(xlclick, ylclick, state->menu["difficulty"].render_size)) {
 							state->main_menu = false;
 							state->difficulty_menu = true;
 						}
-						if(is_inside(xlclick, ylclick, state->menu["exit"].rect.render_size)) {
+						if(is_inside(xlclick, ylclick, state->menu["exit"].render_size)) {
 							return SDL_APP_SUCCESS;
 						}
 					}
 					if(state->difficulty_menu) {
-						if(is_inside(xlclick, ylclick, state->menu["easy"].rect.render_size)) {
+						if(is_inside(xlclick, ylclick, state->menu["easy"].render_size)) {
 							set_difficulty(state, EASY); 
 						}
-						if(is_inside(xlclick, ylclick, state->menu["medium"].rect.render_size)) {
+						if(is_inside(xlclick, ylclick, state->menu["medium"].render_size)) {
 							set_difficulty(state, MEDIUM); 
 						}
-						if(is_inside(xlclick, ylclick, state->menu["hard"].rect.render_size)) {
+						if(is_inside(xlclick, ylclick, state->menu["hard"].render_size)) {
 							set_difficulty(state, HARD); 
 						}
 					}
@@ -311,10 +304,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 						}
 					}
 					if(state->game_paused) {
-						if(is_inside(xlclick, ylclick, state->menu["continue"].rect.hover_size)) {
+						if(is_inside(xlclick, ylclick, state->menu["continue"].hover_size)) {
 							state->game_paused = false;
 						}
-						if(is_inside(xlclick, ylclick, state->menu["quit"].rect.hover_size)) {
+						if(is_inside(xlclick, ylclick, state->menu["quit"].hover_size)) {
 							state->game_started = false;
 							state->game_paused = false;
 							state->main_menu = true;
@@ -334,14 +327,6 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event)
 		case SDL_EVENT_MOUSE_MOTION:
 			float xmotion, ymotion;
 			SDL_GetMouseState(&xmotion, &ymotion);
-			// for(auto &[key, menu] : state->menu) {
-			// 	if(is_inside(xmotion, ymotion, menu.rect.render_size)) {
-			// 		resize_rect(&menu.rect.render_size, menu.rect.hover_size);
-			// 	}
-			// 	else {
-			// 		resize_rect(&menu.rect.render_size, menu.rect.base_size);
-			// 	}
-			// }
 			break;
 		case SDL_EVENT_KEY_DOWN:
 			switch(event->key.key) {
@@ -373,7 +358,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 	float lerp_value = 0.01;
 
 	for(auto &[key, item] : state->menu) {
-		if(is_inside(xpos, ypos, item.rect.base_size)) {
+		if(is_inside(xpos, ypos, item.base_size)) {
 			item.lerp_value= std::lerp(item.lerp_value, lerp_max, lerp_value);
 		}
 		else {
@@ -381,22 +366,22 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 		}
 
 		SDL_FRect temp;
-		temp.x = item.rect.base_size.x;
-		temp.y = item.rect.base_size.y;
-		temp.w = item.rect.base_size.w;
-		temp.h = item.rect.base_size.h;
+		temp.x = item.base_size.x;
+		temp.y = item.base_size.y;
+		temp.w = item.base_size.w;
+		temp.h = item.base_size.h;
 
-		item.rect.render_size.w = temp.w * (item.lerp_value);
-		item.rect.render_size.h = temp.h * (item.lerp_value);
-		item.rect.render_size.x = temp.x - (item.rect.render_size.w - temp.w) / 2;
-		item.rect.render_size.y = temp.y - (item.rect.render_size.h - temp.h) / 2;
+		item.render_size.w = temp.w * (item.lerp_value);
+		item.render_size.h = temp.h * (item.lerp_value);
+		item.render_size.x = temp.x - (item.render_size.w - temp.w) / 2;
+		item.render_size.y = temp.y - (item.render_size.h - temp.h) / 2;
 
-		if(item.rect.render_size.h <= item.rect.base_size.h || item.rect.render_size.w <= item.rect.base_size.w) {
-			resize_rect(&item.rect.render_size, item.rect.base_size);
+		if(item.render_size.h <= item.base_size.h || item.render_size.w <= item.base_size.w) {
+			resize_rect(&item.render_size, item.base_size);
 		}
 
-		if(item.rect.render_size.h >= item.rect.hover_size.h || item.rect.render_size.w >= item.rect.hover_size.w) {
-			resize_rect(&item.rect.render_size, item.rect.hover_size);
+		if(item.render_size.h >= item.hover_size.h || item.render_size.w >= item.hover_size.w) {
+			resize_rect(&item.render_size, item.hover_size);
 		}
 	}
 
@@ -411,18 +396,18 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 	}
 
 	if(state->main_menu) {
-		SDL_RenderTexture(state->renderer, state->menu["start-game"].texture, NULL, &state->menu["start-game"].rect.render_size);
-		SDL_RenderTexture(state->renderer, state->menu["difficulty"].texture, NULL, &state->menu["difficulty"].rect.render_size);
-		SDL_RenderTexture(state->renderer, state->menu["exit"].texture, NULL, &state->menu["exit"].rect.render_size);
+		SDL_RenderTexture(state->renderer, state->menu["start-game"].texture, NULL, &state->menu["start-game"].render_size);
+		SDL_RenderTexture(state->renderer, state->menu["difficulty"].texture, NULL, &state->menu["difficulty"].render_size);
+		SDL_RenderTexture(state->renderer, state->menu["exit"].texture, NULL, &state->menu["exit"].render_size);
 	}
 	if(state->difficulty_menu) {
-		SDL_RenderTexture(state->renderer, state->menu["easy"].texture, NULL, &state->menu["easy"].rect.render_size);
-		SDL_RenderTexture(state->renderer, state->menu["medium"].texture, NULL, &state->menu["medium"].rect.render_size);
-		SDL_RenderTexture(state->renderer, state->menu["hard"].texture, NULL, &state->menu["hard"].rect.render_size);
+		SDL_RenderTexture(state->renderer, state->menu["easy"].texture, NULL, &state->menu["easy"].render_size);
+		SDL_RenderTexture(state->renderer, state->menu["medium"].texture, NULL, &state->menu["medium"].render_size);
+		SDL_RenderTexture(state->renderer, state->menu["hard"].texture, NULL, &state->menu["hard"].render_size);
 	}
 	if(state->game_paused) {
-		SDL_RenderTexture(state->renderer, state->menu["continue"].texture, NULL, &state->menu["continue"].rect.render_size);
-		SDL_RenderTexture(state->renderer, state->menu["quit"].texture, NULL, &state->menu["quit"].rect.render_size);
+		SDL_RenderTexture(state->renderer, state->menu["continue"].texture, NULL, &state->menu["continue"].render_size);
+		SDL_RenderTexture(state->renderer, state->menu["quit"].texture, NULL, &state->menu["quit"].render_size);
 	}
 
 	SDL_RenderPresent(state->renderer);

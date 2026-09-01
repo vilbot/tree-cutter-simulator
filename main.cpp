@@ -20,22 +20,22 @@ enum difficulty {
 };
 
 typedef struct {
-	SDL_Texture* tree_texture;
-	SDL_Texture* ground_texture;
-	int rows;
-	int cols;
-	SDL_FRect location[MAX_TREES][MAX_TREES];
-	SDL_FRect hitboxes[MAX_TREES][MAX_TREES];
-	bool is_occupied[MAX_TREES][MAX_TREES];
-} grid;
-
-typedef struct {
 	SDL_Texture* texture;
 	SDL_FRect base_size;
 	SDL_FRect hover_size;
 	SDL_FRect render_size;
 	float lerp_value;
 } grow_sprite;
+
+typedef struct {
+	SDL_Texture* tree_texture;
+	SDL_Texture* ground_texture;
+	int rows;
+	int cols;
+	grow_sprite location[MAX_TREES][MAX_TREES];
+	SDL_FRect hitboxes[MAX_TREES][MAX_TREES];
+	bool is_occupied[MAX_TREES][MAX_TREES];
+} grid;
 
 typedef struct {
 	SDL_Window* window;
@@ -54,11 +54,13 @@ typedef struct {
 	Uint64 previous_time;
 } game_state;
 
-bool operator==(const SDL_FRect &a, const SDL_FRect &b) {
+bool operator==(const SDL_FRect &a, const SDL_FRect &b) 
+{
 	return a.h == b.h && a.w == b.w;
 }
 
-bool operator!=(const SDL_FRect &a, const SDL_FRect &b) {
+bool operator!=(const SDL_FRect &a, const SDL_FRect &b) 
+{
 	return a.h != b.h || a.w != b.w;
 }
 
@@ -158,7 +160,9 @@ void set_difficulty(game_state* state, difficulty difficulty)
 			temp.y = ((float)y) * tree_h * diff_multiplier;
 			temp.w = tree_w * diff_multiplier;
 			temp.h = tree_h * diff_multiplier;
-			state->grid.location[y][x] = temp;
+			state->grid.location[y][x].lerp_value = 1.0f;
+			state->grid.location[y][x].render_size = state->grid.location[y][x].hover_size = state->grid.location[y][x].base_size = temp;
+			resize_rect(&state->grid.location[y][x].hover_size, 1.15);
 			resize_rect(&temp, HITBOX_SIZE);
 			state->grid.hitboxes[y][x] = temp;
 			state->grid.is_occupied[y][x] = true;
@@ -226,6 +230,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 	create_menu({&state->menu["continue"], &state->menu["quit"]});
 
 	// TODO: Animate the mouse rather than switch between two sprites
+	// TODO!: When resizing the window the cursor position gets messed up
 	char* png_path = NULL;
 	SDL_asprintf(&png_path, "%s../assets/axe1.png", SDL_GetBasePath());
 	state->mouse_sprite[0] = SDL_LoadPNG(png_path);
@@ -357,7 +362,7 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 	float lerp_max = 1.15, lerp_min = 1.0;
 	float lerp_value = 0.01;
 
-	for(auto &[key, item] : state->menu) {
+	for(auto& [key, item] : state->menu) {
 		if(is_inside(xpos, ypos, item.base_size)) {
 			item.lerp_value= std::lerp(item.lerp_value, lerp_max, lerp_value);
 		}
@@ -375,21 +380,45 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 		item.render_size.h = temp.h * (item.lerp_value);
 		item.render_size.x = temp.x - (item.render_size.w - temp.w) / 2;
 		item.render_size.y = temp.y - (item.render_size.h - temp.h) / 2;
+	}
 
-		if(item.render_size.h <= item.base_size.h || item.render_size.w <= item.base_size.w) {
-			resize_rect(&item.render_size, item.base_size);
-		}
+	if(state->game_started && !state->game_paused) {
+		for(int y = 0; y < state->grid.rows; ++y) {
+			for(int x = 0; x < state->grid.cols; ++x) {
+				auto& item = state->grid.location[y][x];
+				if(is_inside(xpos, ypos, state->grid.hitboxes[y][x])) {
+					item.lerp_value = std::lerp(item.lerp_value, lerp_max, lerp_value);
+					std::cout << "inside tree " << x << ", " << y << std::endl;
+				}
+				else {
+					item.lerp_value = std::lerp(item.lerp_value, lerp_min, lerp_value);
+				}
 
-		if(item.render_size.h >= item.hover_size.h || item.render_size.w >= item.hover_size.w) {
-			resize_rect(&item.render_size, item.hover_size);
+				SDL_FRect temp;
+				temp.x = item.base_size.x;
+				temp.y = item.base_size.y;
+				temp.w = item.base_size.w;
+				temp.h = item.base_size.h;
+
+				item.render_size.w = temp.w * (item.lerp_value);
+				item.render_size.h = temp.h * (item.lerp_value);
+				item.render_size.x = temp.x - (item.render_size.w - temp.w) / 2;
+				item.render_size.y = temp.y - (item.render_size.h - temp.h) / 2;
+			}
 		}
 	}
 
 	for(int y = 0; y < state->grid.rows; ++y) {
 		for(int x = 0; x < state->grid.cols; ++x) {
-			SDL_RenderTexture(state->renderer, state->grid.ground_texture, NULL, &state->grid.location[y][x]);
+			SDL_RenderTexture(state->renderer, state->grid.ground_texture, NULL, &state->grid.location[y][x].base_size);
 			if(state->grid.is_occupied[y][x]) {
-				SDL_RenderTexture(state->renderer, state->grid.tree_texture, NULL, &state->grid.location[y][x]);
+				if(state->game_started && !state->game_paused) {
+					SDL_RenderTexture(state->renderer, state->grid.tree_texture, NULL, &state->grid.location[y][x].render_size);
+				}
+				else {
+					SDL_RenderTexture(state->renderer, state->grid.tree_texture, NULL, &state->grid.location[y][x].base_size);
+				}
+
 			}
 			// SDL_RenderRect(state->renderer, &state->grid.hitboxes[y][x]);
 		}

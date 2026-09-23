@@ -8,10 +8,28 @@
 #include <unordered_map>
 #include <cmath>
 
-#define TILES_X 400
-#define TILES_Y 300
-#define DEFAULT_VIEW_TILES 20
-#define TILE_WORLD_SIZE 32
+constexpr int   TILES_X   = 400;
+constexpr int   TILES_Y   = 300;
+constexpr float TILE_SIZE = 32.0f;
+constexpr float MAP_W     = TILES_X * TILE_SIZE;
+constexpr float MAP_H     = TILES_Y * TILE_SIZE;
+
+constexpr float LOGICAL_W = 1920.0f;
+constexpr float LOGICAL_H = 1080.0f;
+constexpr float ASPECT    = LOGICAL_H / LOGICAL_W;
+
+constexpr int DEFAULT_VIEW_TILES = 20;
+
+struct Tile_Pos  { int col, row; };
+struct World_Pos { float x, y; };
+
+inline World_Pos tile_to_world(Tile_Pos t) {
+	return { t.col * TILE_SIZE, t.row * TILE_SIZE };
+}
+
+inline Tile_Pos world_to_tile(World_Pos p) {
+	return { (int)std::floor(p.x / TILE_SIZE), (int)std::floor(p.y / TILE_SIZE) };
+}
 
 enum Tile_Type : uint8_t {
 	TILE_NONE,
@@ -21,11 +39,18 @@ enum Tile_Type : uint8_t {
 	TILE_COUNT
 };
 
-static const char* Tile_Files[TILE_COUNT] = {
-	nullptr,
-	"assets/map/ground.png",
-	"assets/map/water.png",
-	"assets/map/tree.png",
+struct Tile_Info {
+	const char* name;
+	const char* file;
+	bool blocks_movement;
+	float chop_seconds;
+};
+
+static const Tile_Info Tile_Infos[TILE_COUNT] = {
+	{ "none",   nullptr,                 false, 0.0f },
+	{ "ground", "assets/map/ground.png", false, 0.0f },
+	{ "water",  "assets/map/water.png",  false, 0.0f },
+	{ "tree",   "assets/map/tree.png",   false, 1.5f },
 };
 
 struct Grow_Sprite {
@@ -38,7 +63,6 @@ struct Grow_Sprite {
 
 // TODO:
 // - Read the claude chat about the menu system using a stack
-// - Change the "difficulty" png to "settings"
 struct Menu {
 	std::unordered_map<std::string, Grow_Sprite> sprites;
 	bool main_menu;
@@ -47,15 +71,55 @@ struct Menu {
 	bool game_paused;
 };
 
+struct Map;
+struct Tile {
+	Map* map;
+	int col, row;
+
+	Tile_Type environment() const; 
+	Tile_Type tree() const;
+
+	const Tile_Info& env_info()  const { return Tile_Infos[environment()]; }
+	const Tile_Info& tree_info() const { return Tile_Infos[tree()]; }
+
+	World_Pos world_pos() const { return tile_to_world({col, row}); }
+	bool has_tree()       const { return tree() == TILE_TREE; }
+	void chop();
+};
+
 // TODO:
-// - One container for environment (ground, water, mountain etc) and another for trees that renders on top of the 
-// environment. Ground, water and mountains all have different properties so the container needs to be generic
 // - Random environment generation
+// - Add properties to environment types
 struct Map {
 	SDL_Texture* textures[TILE_COUNT];
 	Tile_Type environment[TILES_Y][TILES_X];
 	Tile_Type trees[TILES_Y][TILES_X];
+
+	Map() {
+		for(int y = 0; y < TILES_Y; ++y) {
+			for(int x = 0; x < TILES_X; ++x) {
+				if(y % 2 == 0) {
+					environment[y][x] = TILE_GROUND;
+					trees[y][x] = TILE_TREE; 
+				}
+				else {
+					environment[y][x] = TILE_WATER;
+					trees[y][x] = TILE_NONE;
+				}
+			}
+		}
+	}
+
+	bool in_bounds(int col, int row) const {
+		return col >= 0 && col < TILES_X && row >= 0 && row < TILES_Y;
+	}
+
+	Tile at(int col, int row) { return { this, col, row}; }
 };
+
+inline Tile_Type Tile::environment() const { return map->environment[row][col]; }
+inline Tile_Type Tile::tree()        const { return map->trees[row][col]; }
+inline void      Tile:: chop()             { map->trees[row][col] = TILE_NONE; }
 
 struct View {
 	float left, right, top, bottom;
@@ -73,30 +137,29 @@ struct Camera {
 	SDL_Renderer* renderer = nullptr;
 
 	Camera() {
-		zoom_level = 1.0f;
-		target_zoom = 1.0f;
-		w = DEFAULT_VIEW_TILES * TILE_WORLD_SIZE / zoom_level;
-		h = w * (1080.0f / 1920.0f);
-		x = TILES_X * TILE_WORLD_SIZE / 2;
-		y = TILES_Y * TILE_WORLD_SIZE / 2;
+		zoom_level = target_zoom = 0.05f;
+		w = DEFAULT_VIEW_TILES * TILE_SIZE / zoom_level;
+		h = w * ASPECT;
+		x = TILES_X * TILE_SIZE / 2;
+		y = TILES_Y * TILE_SIZE / 2;
 	}
 
 	View get_view() {
-		view.left =   x - (w / 2);
-		view.right =  x + (w / 2);
-		view.top =    y - (h / 2);
+		view.left   = x - (w / 2);
+		view.right  = x + (w / 2);
+		view.top    = y - (h / 2);
 		view.bottom = y + (h / 2);
 
-		view.col_start = (int)(view.left / TILE_WORLD_SIZE);
+		view.col_start = (int)(view.left / TILE_SIZE);
 		if(view.col_start <= 0) view.col_start = 0;
 
-		view.col_end = (int)(view.right / TILE_WORLD_SIZE) + 1;
+		view.col_end = (int)(view.right / TILE_SIZE) + 1;
 		if(view.col_end >= TILES_X) view.col_end = TILES_X;
 
-		view.row_start = (int)(view.top / TILE_WORLD_SIZE);
+		view.row_start = (int)(view.top / TILE_SIZE);
 		if(view.row_start <= 0) view.row_start = 0;
 
-		view.row_end = (int)(view.bottom / TILE_WORLD_SIZE) + 1;
+		view.row_end = (int)(view.bottom / TILE_SIZE) + 1;
 		if(view.row_end >= TILES_Y) view.row_end = TILES_Y;
 
 		return view;
@@ -134,8 +197,8 @@ struct Camera {
 		float speed = 12.0f;
 		float t = 1.0f - std::exp(-speed * dt);
 		zoom_level = std::exp(std::lerp(std::log(zoom_level), std::log(target_zoom), t));
-		w = DEFAULT_VIEW_TILES * TILE_WORLD_SIZE / zoom_level;
-		h = w * (1080.0f / 1920.0f);
+		w = DEFAULT_VIEW_TILES * TILE_SIZE / zoom_level;
+		h = w * ASPECT;
 
 		float scale_after = log_w / w;
 		x = world_x - (mouse_x - log_w * 0.5f) / scale_after;
@@ -201,7 +264,7 @@ SDL_Texture* load_texture(Game* state, const std::filesystem::path& png_path)
 	return texture;
 }
 
-template <typename T>
+	template <typename T>
 void load_textures(Game* state, const std::string& folder, std::unordered_map<std::string, T>& sprites)
 {
 	for(const auto& entry : std::filesystem::directory_iterator(asset_path(folder))) {
@@ -257,19 +320,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[])
 
 	load_textures(state, "assets/menu", state->menu.sprites);
 	for(int i = 0; i < TILE_COUNT; ++i) {
-		state->map.textures[i] = Tile_Files[i] ? load_texture(state, asset_path(Tile_Files[i])) : nullptr;
+		state->map.textures[i] = Tile_Infos[i].file ? load_texture(state, asset_path(Tile_Infos[i].file)) : nullptr;
 	}
 
 	create_menu({&state->menu.sprites["start-game"], &state->menu.sprites["settings"], &state->menu.sprites["exit"]});
 	create_menu({&state->menu.sprites["easy"], &state->menu.sprites["medium"], &state->menu.sprites["hard"]});
 	create_menu({&state->menu.sprites["continue"], &state->menu.sprites["quit"]});
-
-	for(int y = 0; y < TILES_Y; ++y) {
-		for(int x = 0; x < TILES_X; ++x) {
-			state->map.trees[y][x] = TILE_TREE;
-			state->map.environment[y][x] = TILE_GROUND;
-		}
-	}
 
 	return SDL_APP_CONTINUE;
 }
@@ -322,19 +378,19 @@ SDL_AppResult SDL_AppIterate(void* appstate)
 	View view = camera->get_view();
 	for(int row = view.row_start; row < view.row_end; ++row) {
 		for(int col = view.col_start; col < view.col_end; ++col) {
-			float tile_world_x = col * TILE_WORLD_SIZE;
-			float tile_world_y = row * TILE_WORLD_SIZE;
+			Tile tile = state->map.at(col, row);
+			World_Pos pos = tile.world_pos();
 
 			SDL_FRect dstrect;
-			dstrect.x = (tile_world_x - view.left) * scale;
-			dstrect.y = (tile_world_y - view.top) * scale;
-			dstrect.w = TILE_WORLD_SIZE * scale;
-			dstrect.h = TILE_WORLD_SIZE * scale;
+			dstrect.x = (pos.x - view.left) * scale;
+			dstrect.y = (pos.y - view.top) * scale;
+			dstrect.w = TILE_SIZE * scale;
+			dstrect.h = TILE_SIZE * scale;
 
-			SDL_Texture* env_texture = state->map.textures[state->map.environment[row][col]];
-			SDL_Texture* tree_texture = state->map.textures[state->map.trees[row][col]];
-			if(env_texture) SDL_RenderTexture(state->renderer, env_texture, NULL, &dstrect);
-			if(tree_texture) SDL_RenderTexture(state->renderer, tree_texture, NULL, &dstrect);
+			SDL_Texture* env = state->map.textures[tile.environment()];
+			SDL_Texture* tree = state->map.textures[tile.tree()];
+			if(env) SDL_RenderTexture(state->renderer, env, NULL, &dstrect);
+			if(tree) SDL_RenderTexture(state->renderer, tree, NULL, &dstrect);
 		}
 	}
 
